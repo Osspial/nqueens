@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex, Condvar};
+use std::sync::{Arc, Mutex, Condvar, atomic::{AtomicUsize, Ordering}};
 use std::thread;
 use std::time::{Instant, Duration};
 use crossterm::{cursor, terminal};
+use rayon::prelude::*;
 
 fn main() {
     let completed_board_arc = Arc::new((Mutex::new(None), Condvar::new()));
@@ -40,9 +41,9 @@ fn main() {
     thread::sleep_ms(50);
     for side_size in 4.. {
         let base_board = Board::new(side_size);
-        let mut num_boards = 0;
+        let num_boards = AtomicUsize::new(0);
         let start_time = Instant::now();
-        find_valid_boards(&base_board, 0, &mut num_boards, &completed_board_arc);
+        find_valid_boards(&base_board, 0, &num_boards, &completed_board_arc);
         let end_time = Instant::now();
         {
             let mut lock = completed_board_arc.0.lock().unwrap();
@@ -59,15 +60,15 @@ fn main() {
 fn find_valid_boards(
     base_board: &Board,
     col: usize,
-    num_boards: &mut usize,
+    num_boards: &AtomicUsize,
     completed_board_arc: &Arc<(Mutex<Option<BoardPrint>>, Condvar)>,
 ) {
     if base_board.is_complete() {
-        *num_boards += 1;
+        let board_num = 1 + num_boards.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut lock) = completed_board_arc.0.try_lock() {
             *lock = Some(BoardPrint {
                 board: base_board.clone(),
-                board_num: *num_boards,
+                board_num,
                 board_find_time: None,
             });
             completed_board_arc.1.notify_all();
@@ -75,9 +76,11 @@ fn find_valid_boards(
         return;
     }
 
-    for child_board in base_board.valid_direct_children_with_queen_in_col(col) {
-        find_valid_boards(&child_board, col + 1, num_boards, completed_board_arc);
-    }
+    base_board.parallel_valid_direct_children_with_queen_in_col(col)
+        .for_each(|child_board| find_valid_boards(&child_board, col + 1, num_boards, completed_board_arc));
+    // for child_board in base_board.valid_direct_children_with_queen_in_col(col) {
+    //     find_valid_boards(&child_board, col + 1, num_boards, completed_board_arc);
+    // }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -128,6 +131,12 @@ impl Board {
 
     fn valid_direct_children_with_queen_in_col(&self, col: usize) -> impl '_ + Iterator<Item=Board> {
         (0..self.side_size)
+            .map(move |row| Queen::new(col, row))
+            .filter_map(move |queen| self.try_insert_queen(queen))
+    }
+
+    fn parallel_valid_direct_children_with_queen_in_col(&self, col: usize) -> impl '_ + ParallelIterator<Item=Board> {
+        (0..self.side_size).into_par_iter()
             .map(move |row| Queen::new(col, row))
             .filter_map(move |queen| self.try_insert_queen(queen))
     }
