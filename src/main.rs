@@ -153,40 +153,64 @@ impl Board {
     }
 
     fn is_valid(&self) -> bool {
-        let mut occupied_rows = [false; 32];
-        let mut occupied_cols = [false; 32];
-        let mut occupied_sw_diagonals = [false; 32];
-        let mut occupied_se_diagonals = [false; 32];
-
-        for q in &self.queens {
-            let row = q.row();
-            let col = q.col();
-            let sw_diagonal = q.sw_diagonal(self.side_size);
-            let se_diagonal = q.se_diagonal(self.side_size);
-
-            if occupied_rows[row] {
-                return false;
-            } else {
-                occupied_rows[row] = true;
-            }
-            if occupied_cols[col] {
-                return false;
-            } else {
-                occupied_cols[col] = true;
-            }
-            if occupied_sw_diagonals[sw_diagonal] {
-                return false;
-            } else {
-                occupied_sw_diagonals[sw_diagonal] = true;
-            }
-            if occupied_se_diagonals[se_diagonal] {
-                return false;
-            } else {
-                occupied_se_diagonals[se_diagonal] = true;
-            }
+        use std::cell::RefCell;
+        thread_local!{
+            static BOOL_FIELD: RefCell<Vec<bool>> = RefCell::new(Vec::new());
         }
+        BOOL_FIELD.with(|bool_field| {
+            let mut bool_field = bool_field.borrow_mut();
+            let needed_size = self.side_size * 6;
+            if bool_field.len() < needed_size {
+                *bool_field = vec![false; needed_size];
+            } else {
+                for b in &mut *bool_field {
+                    *b = false;
+                }
+            }
+            let mut bool_field_slice = &mut bool_field[..];
+            let (s, r) = bool_field_slice.split_at_mut(self.side_size);
+            bool_field_slice = r;
+            let occupied_rows = s;
+            let (s, r) = bool_field_slice.split_at_mut(self.side_size);
+            bool_field_slice = r;
+            let occupied_cols = s;
+            let (s, r) = bool_field_slice.split_at_mut(self.side_size * 2);
+            bool_field_slice = r;
+            let occupied_sw_diagonals = s;
+            let (s, r) = bool_field_slice.split_at_mut(self.side_size * 2);
+            bool_field_slice = r;
+            let occupied_se_diagonals = s;
 
-        return true;
+            for q in &self.queens {
+                let row = q.row();
+                let col = q.col();
+                let sw_diagonal = q.sw_diagonal(self.side_size);
+                let se_diagonal = q.se_diagonal(self.side_size);
+
+                if occupied_rows[row] {
+                    return false;
+                } else {
+                    occupied_rows[row] = true;
+                }
+                if occupied_cols[col] {
+                    return false;
+                } else {
+                    occupied_cols[col] = true;
+                }
+                if occupied_sw_diagonals[sw_diagonal] {
+                    return false;
+                } else {
+                    occupied_sw_diagonals[sw_diagonal] = true;
+                }
+                if occupied_se_diagonals[se_diagonal] {
+                    return false;
+                } else {
+                    occupied_se_diagonals[se_diagonal] = true;
+                }
+            }
+
+            return true;
+        })
     }
 }
 
