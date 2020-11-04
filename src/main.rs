@@ -8,13 +8,15 @@ fn main() {
     thread::spawn(move|| {
         let (mutex, cvar) = &*completed_board_arc_cloned;
         loop {
-            let mut completed_board_lock = mutex.lock().unwrap();
-            let lock = cvar.wait(completed_board_lock).unwrap();
             let BoardPrint {
                 board,
                 board_num,
                 board_find_time,
-            } = lock.clone().take().expect("condvar set without board");
+            } = {
+                let completed_board_lock = mutex.lock().unwrap();
+                let lock = cvar.wait(completed_board_lock).unwrap();
+                lock.clone().take().expect("condvar set without board")
+            };
 
             print!("\x1B[2J\x1B[1;1H");
             println!("complete board #{} of size {} found", board_num, board.side_size);
@@ -26,8 +28,8 @@ fn main() {
             }
         }
     });
+    thread::sleep_ms(50);
     for side_size in 4.. {
-        print!("\x1B[2J\x1B[1;1H");
         let base_board = Board::new(side_size);
         let mut num_boards = 0;
         let start_time = Instant::now();
@@ -36,9 +38,11 @@ fn main() {
         {
             let mut lock = completed_board_arc.0.lock().unwrap();
             lock.as_mut().unwrap().board_find_time = Some(end_time - start_time);
-            completed_board_arc.1.notify_one();
         }
-        thread::sleep_ms(2000);
+        for _ in 0..150 {
+            thread::sleep_ms(10);
+            completed_board_arc.1.notify_all();
+        }
     }
 }
 
@@ -56,7 +60,7 @@ fn find_valid_boards(
                 board_num: *num_boards,
                 board_find_time: None,
             });
-            completed_board_arc.1.notify_one();
+            completed_board_arc.1.notify_all();
         }
         return;
     }
