@@ -1,29 +1,76 @@
+use std::sync::{Arc, Mutex, Condvar};
+use std::thread;
+use std::time::{Instant, Duration};
+
 fn main() {
+    let completed_board_arc = Arc::new((Mutex::new(None), Condvar::new()));
+    let completed_board_arc_cloned = completed_board_arc.clone();
+    thread::spawn(move|| {
+        let (mutex, cvar) = &*completed_board_arc_cloned;
+        loop {
+            let mut completed_board_lock = mutex.lock().unwrap();
+            let lock = cvar.wait(completed_board_lock).unwrap();
+            let BoardPrint {
+                board,
+                board_num,
+                board_find_time,
+            } = lock.clone().take().expect("condvar set without board");
+
+            print!("\x1B[2J\x1B[1;1H");
+            println!("complete board #{} of size {} found", board_num, board.side_size);
+            board.print_board();
+            println!("Press Ctrl+C to exit");
+
+            if let Some(time) = board_find_time {
+                println!("finding all valid boards of size {} took {:?}", board.side_size, time);
+            }
+        }
+    });
     for side_size in 4.. {
         print!("\x1B[2J\x1B[1;1H");
         let base_board = Board::new(side_size);
         let mut num_boards = 0;
-        let start_time = std::time::Instant::now();
-        find_valid_boards(&base_board, 0, &mut num_boards);
-        let end_time = std::time::Instant::now();
-        println!("finding all valid boards of size {} took {:?}", side_size, end_time - start_time);
-        std::thread::sleep_ms(2000);
+        let start_time = Instant::now();
+        find_valid_boards(&base_board, 0, &mut num_boards, &completed_board_arc);
+        let end_time = Instant::now();
+        {
+            let mut lock = completed_board_arc.0.lock().unwrap();
+            lock.as_mut().unwrap().board_find_time = Some(end_time - start_time);
+            completed_board_arc.1.notify_one();
+        }
+        thread::sleep_ms(2000);
     }
 }
 
-fn find_valid_boards(base_board: &Board, col: usize, num_boards: &mut usize) {
+fn find_valid_boards(
+    base_board: &Board,
+    col: usize,
+    num_boards: &mut usize,
+    completed_board_arc: &Arc<(Mutex<Option<BoardPrint>>, Condvar)>,
+) {
     if base_board.is_complete() {
         *num_boards += 1;
-        print!("\x1B[2J\x1B[1;1H");
-        println!("complete board #{} of size {} found", *num_boards, base_board.side_size);
-        base_board.print_board();
-        println!("Press Ctrl+C to exit");
+        if let Ok(mut lock) = completed_board_arc.0.try_lock() {
+            *lock = Some(BoardPrint {
+                board: base_board.clone(),
+                board_num: *num_boards,
+                board_find_time: None,
+            });
+            completed_board_arc.1.notify_one();
+        }
         return;
     }
 
     for child_board in base_board.valid_direct_children_with_queen_in_col(col) {
-        find_valid_boards(&child_board, col + 1, num_boards);
+        find_valid_boards(&child_board, col + 1, num_boards, completed_board_arc);
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BoardPrint {
+    board: Board,
+    board_num: usize,
+    board_find_time: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
