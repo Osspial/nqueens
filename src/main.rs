@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex, Condvar};
 use std::thread;
 use std::time::{Instant, Duration};
+use crossterm::{cursor, terminal};
 
 fn main() {
     let completed_board_arc = Arc::new((Mutex::new(None), Condvar::new()));
@@ -20,7 +21,11 @@ fn main() {
             };
 
             let mut string = String::new();
-            string += "\x1B[2J\x1B[1;1H";
+            // string += "\x1B[2J\x1B[1;1H";
+            let crossterm_clear = terminal::Clear(terminal::ClearType::FromCursorUp);
+            let crossterm_move_to = cursor::MoveTo(0, 0);
+            let crossterm_hide = cursor::Hide;
+            string += &format!("{}{}{}", crossterm_clear, crossterm_move_to, crossterm_hide);
             string += &format!("complete board #{} of size {} found\n", board_num, board.side_size);
             string += &board.get_board_string();
             string += "\nPress Ctrl+C to exit\n";
