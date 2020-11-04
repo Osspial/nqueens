@@ -7,6 +7,7 @@ fn main() {
     let completed_board_arc_cloned = completed_board_arc.clone();
     thread::spawn(move|| {
         let (mutex, cvar) = &*completed_board_arc_cloned;
+        let mut old_board = None;
         loop {
             let BoardPrint {
                 board,
@@ -14,18 +15,21 @@ fn main() {
                 board_find_time,
             } = {
                 let completed_board_lock = mutex.lock().unwrap();
-                let lock = cvar.wait(completed_board_lock).unwrap();
+                let lock = cvar.wait_while(completed_board_lock, |b| *b == old_board).unwrap();
                 lock.clone().take().expect("condvar set without board")
             };
 
-            print!("\x1B[2J\x1B[1;1H");
-            println!("complete board #{} of size {} found", board_num, board.side_size);
-            board.print_board();
-            println!("Press Ctrl+C to exit");
+            let mut string = String::new();
+            string += "\x1B[2J\x1B[1;1H";
+            string += &format!("complete board #{} of size {} found\n", board_num, board.side_size);
+            string += &board.get_board_string();
+            string += "\nPress Ctrl+C to exit\n";
 
             if let Some(time) = board_find_time {
-                println!("finding all valid boards of size {} took {:?}", board.side_size, time);
+                string += &format!("finding all valid boards of size {} took {:?}", board.side_size, time);
             }
+            println!("{}", string);
+            old_board = Some(BoardPrint { board, board_num, board_find_time });
         }
     });
     thread::sleep_ms(50);
@@ -39,8 +43,9 @@ fn main() {
             let mut lock = completed_board_arc.0.lock().unwrap();
             lock.as_mut().unwrap().board_find_time = Some(end_time - start_time);
         }
-        for _ in 0..150 {
-            thread::sleep_ms(10);
+        // wait for one and a half seconds
+        for _ in 0..50 {
+            thread::sleep_ms(30);
             completed_board_arc.1.notify_all();
         }
     }
@@ -97,7 +102,7 @@ impl Board {
         }
     }
 
-    fn print_board(&self) {
+    fn get_board_string(&self) -> String {
         let mut string = String::new();
         for y in 0..self.side_size {
             for x in 0..self.side_size {
@@ -109,7 +114,7 @@ impl Board {
             }
             string += "\n";
         }
-        println!("{}", string);
+        string
     }
 
     fn is_complete(&self) -> bool {
