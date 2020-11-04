@@ -43,6 +43,12 @@ fn main() {
         let base_board = Board::new(side_size);
         let num_boards = AtomicUsize::new(0);
         let start_time = Instant::now();
+        {
+            let mut lock = completed_board_arc.0.lock().unwrap();
+            if let Some(b) = lock.as_mut() {
+                b.board_num = 0;
+            }
+        }
         find_valid_boards(&base_board, 0, &num_boards, &completed_board_arc);
         let end_time = Instant::now();
         {
@@ -66,13 +72,16 @@ fn find_valid_boards(
     if base_board.is_complete() {
         let board_num = 1 + num_boards.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut lock) = completed_board_arc.0.try_lock() {
-            *lock = Some(BoardPrint {
-                board: base_board.clone(),
-                board_num,
-                board_find_time: None,
-            });
-            completed_board_arc.1.notify_all();
+            if board_num > lock.as_ref().map(|b| b.board_num).unwrap_or(0) {
+                *lock = Some(BoardPrint {
+                    board: base_board.clone(),
+                    board_num,
+                    board_find_time: None,
+                });
+                completed_board_arc.1.notify_all();
+            }
         }
+        thread::yield_now();
         return;
     }
 
